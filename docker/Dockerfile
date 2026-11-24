@@ -51,7 +51,10 @@ RUN pip install --no-index --find-links=/wheels /wheels/*.whl && rm -rf /wheels
 
 COPY --chown=django:django . /workspace
 COPY --chown=django:django docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+
+RUN mkdir -p /workspace/staticfiles /workspace/media \
+    && chown -R django:django /workspace/staticfiles /workspace/media \
+    && chmod +x /entrypoint.sh
 
 USER django
 EXPOSE 8000
