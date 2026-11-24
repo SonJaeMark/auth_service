@@ -185,11 +185,14 @@ FROM base AS prod
 RUN groupadd -r django && useradd -r -g django django
 
 COPY --from=builder /wheels /wheels
-RUN pip install --no-index --find-links=/wheels -r requirements.txt && rm -rf /wheels
+RUN pip install --no-index --find-links=/wheels /wheels/*.whl && rm -rf /wheels
 
 COPY --chown=django:django . /workspace
 COPY --chown=django:django docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+
+RUN mkdir -p /workspace/staticfiles /workspace/media \
+    && chown -R django:django /workspace/staticfiles /workspace/media \
+    && chmod +x /entrypoint.sh
 
 USER django
 EXPOSE 8000
@@ -256,20 +259,24 @@ ruff>=0.9
 Copy this file to `.env` locally (never commit `.env` to Git) and configure matching variables on Render:
 
 ```env
-DEBUG=0
+DEBUG=1
 SECRET_KEY=replace-with-strong-secret-key
+ALLOWED_HOSTS=localhost,127.0.0.1,[::1],.onrender.com
 DJANGO_SETTINGS_MODULE=config.settings
-ALLOWED_HOSTS=localhost,127.0.0.1,.onrender.com
 
 # Supabase connection string (Transaction pooler uses port 6543; Session/Direct uses 5432)
 DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres?sslmode=require
 
-# Dedicated schema per microservice in Supabase (e.g., auth_svc, exam_svc, grading_svc, results_svc)
-DB_SCHEMA=public
+# Optional schema isolation per microservice in Supabase
+DB_SCHEMA=auth_svc
 
-# Optional internal gateway authentication for downstream services
-INTERNAL_GATEWAY_TOKEN=replace-with-shared-internal-token
+DISABLE_SERVER_SIDE_CURSORS=True
 ```
+
+For an Auth Service deployment, keep `DB_SCHEMA=auth_svc` and
+`DISABLE_SERVER_SIDE_CURSORS=True` when using the Supabase transaction pooler.
+The settings detect the pooler's `6543` port automatically. Never copy a real
+database password or signing secret into `.env.example` or commit them to Git.
 
 #### `.dockerignore`
 
@@ -311,10 +318,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-insecure-secret-key")
+JWT_SIGNING_SECRET = os.environ.get("JWT_SIGNING_SECRET", SECRET_KEY)
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_TTL_SECONDS = int(os.environ.get("ACCESS_TOKEN_TTL_SECONDS", "3600"))
+REFRESH_TOKEN_TTL_DAYS = int(os.environ.get("REFRESH_TOKEN_TTL_DAYS", "7"))
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 ALLOWED_HOSTS = [
     h.strip()
-    for h in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,.onrender.com").split(",")
+    for h in os.environ.get(
+        "ALLOWED_HOSTS", "localhost,127.0.0.1,[::1],.onrender.com"
+    ).split(",")
     if h.strip()
 ]
 
@@ -486,4 +499,4 @@ class InternalGatewayAuthMiddleware:
    - Create a new **Web Service** linked to the microservice's GitHub repository.
    - Choose **Docker** as the runtime and set the Dockerfile path to `docker/Dockerfile` (target `prod` if configuring build target).
    - Set **Health Check Path** to `/health`.
-   - Configure environment variables in Render (**Environment** tab): `SECRET_KEY`, `DEBUG=0`, `DJANGO_SETTINGS_MODULE`, `ALLOWED_HOSTS`, `DATABASE_URL`, `DB_SCHEMA`, and `INTERNAL_GATEWAY_TOKEN` (as applicable).
+   - Configure environment variables in Render (**Environment** tab): `SECRET_KEY`, `DEBUG=0`, `DJANGO_SETTINGS_MODULE`, `ALLOWED_HOSTS`, `DATABASE_URL`, `DB_SCHEMA`, and `DISABLE_SERVER_SIDE_CURSORS=True`.
