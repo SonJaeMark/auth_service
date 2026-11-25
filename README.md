@@ -445,9 +445,11 @@ curl http://localhost:8000/health
 
 ---
 
-### Step 7: Optional Internal Gateway Middleware (Downstream Services)
+### Step 7: Optional JWT User Context Middleware (Downstream Services)
 
-For services behind your API Gateway (such as **Exam**, **Grading**, and **Results**), validate `X-Internal-Token` using a constant-time comparison (`hmac.compare_digest`) and attach verified identity headers (`X-User-Id`, `X-User-Role`) sent by the Gateway:
+For downstream services such as **Exam**, **Grading**, and **Results**, validate the auth service's signed access token in each service. Have the API Gateway forward the original `Authorization: Bearer <access-token>` header; do not trust user ID or role headers supplied by clients.
+
+Copy this middleware into each service as `<service_app>/middleware.py`. It rejects missing, invalid, or expired tokens and attaches the verified identity metadata to the Django request. The auth service's access token contains `uid` (the user's UUID), `sub` (the user code), `role`, and `email`.
 
 ```python
 # <service_app>/middleware.py
@@ -501,6 +503,16 @@ class UserContextMiddleware:
         return self.get_response(request)
 
 ```
+
+Add the middleware path to the service's existing `MIDDLEWARE` list:
+
+```python
+"<service_app>.middleware.UserContextMiddleware",
+```
+
+Configure each downstream service with the same `JWT_SIGNING_SECRET` and `JWT_ALGORITHM` as the auth service. Set `JWT_SIGNING_SECRET` explicitly in each deployment rather than relying on a service-specific `SECRET_KEY` fallback. With the current `HS256` algorithm, every service holding this shared secret can also create tokens; use an asymmetric signing algorithm if downstream services should verify tokens without being able to mint them.
+
+Authenticated views can read `request.user_id`, `request.user_code`, `request.user_role`, `request.user_email`, and the complete verified payload from `request.auth_claims`. Health paths `/health` and `/api/v1/health` are exempt by default; override `JWT_AUTH_EXEMPT_PATHS` in settings if needed.
 
 ---
 
