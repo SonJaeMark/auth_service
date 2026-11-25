@@ -445,7 +445,7 @@ curl http://localhost:8000/health
 
 ---
 
-### Step 7: Optional JWT User Context Middleware (Downstream Services)
+### Step 7: Optional Internal Gateway Middleware (Downstream Services)
 
 For downstream services such as **Exam**, **Grading**, and **Results**, validate the auth service's signed access token in each service. Have the API Gateway forward the original `Authorization: Bearer <access-token>` header; do not trust user ID or role headers supplied by clients.
 
@@ -478,14 +478,18 @@ class UserContextMiddleware:
         if not separator or scheme.lower() != "bearer" or not token.strip():
             return JsonResponse({"error": "Unauthorized"}, status=401)
 
+        signing_secret = getattr(settings, "JWT_SIGNING_SECRET", settings.SECRET_KEY)
+        algorithm = getattr(settings, "JWT_ALGORITHM", "HS256")
+
         try:
             claims = jwt.decode(
                 token.strip(),
-                settings.JWT_SIGNING_SECRET,
-                algorithms=[settings.JWT_ALGORITHM],
+                signing_secret,
+                algorithms=[algorithm],
                 options={"require": ["exp", "iat", "sub", "uid", "role"]},
             )
-        except jwt.PyJWTError:
+        except jwt.PyJWTError as exc:
+            print("JWT DECODE ERROR:", type(exc).__name__, exc)
             return JsonResponse({"error": "Unauthorized"}, status=401)
 
         if not all(
